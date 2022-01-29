@@ -1,0 +1,26 @@
+{
+  "name": "youtube-crawler",
+  "version": "0.1.0",
+  "description": "Do some youtube magic",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "npx jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/m-thompson-code/youtube-crawler.git"
+  },
+  "keywords": [
+    "youtube",
+    "crawler"
+  ],
+  "author": "Mark Thompson",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/m-thompson-code/youtube-crawler/issues"
+  },
+  "homepage": "https://github.com/m-thompson-code/youtube-crawler#readme",
+  "devDependencies": {
+    "typescript": "^4.5.5"
+  }
+}
