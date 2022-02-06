@@ -21,6 +21,7 @@ export enum Status {
     PENDING = "PENDING",
     COMPLETED = "COMPLETED",
     CANCELLED = "CANCELLED",
+    ERROR = "ERROR"
 }
 
 const getDocument = (): DocumentReference<DocumentData>  => {

@@ -20,6 +20,8 @@ const authenticateBot = async() => {
 }
 
 const isCorrectChannel = async () => {
+    crawlerLog("Checking channel is correct...");
+
     const channelName = getChannelName();
 
     // Assume page hasn't rendered yet to show channel name,
@@ -29,7 +31,7 @@ const isCorrectChannel = async () => {
     }
 
     if (channelName !== 'Philip DeFranco') {
-        await updateVideoMetadata({ status: Status.CANCELLED, log: `Unexpected channel isn't correct: ${channelName}` });
+        await updateVideoMetadata({ status: Status.ERROR, log: `Unexpected channel isn't correct: ${channelName}` });
 
         throw new Error("Unexpected incorrect channel found");
     }
@@ -37,7 +39,7 @@ const isCorrectChannel = async () => {
     return true;
 }
 
-const cancel = async(): Promise<void> => {
+const cancel = async(cancelDueToTimeout: boolean): Promise<void> => {
     const { status } = await getVideoMetadata();
 
     if (status === Status.COMPLETED) {
@@ -45,7 +47,11 @@ const cancel = async(): Promise<void> => {
         return;
     }
 
-    await updateVideoMetadata({ status: Status.CANCELLED, log: "Manual cancel called" });
+    if (cancelDueToTimeout) {
+        await updateVideoMetadata({ status: Status.ERROR, log: "Timeout" });
+    } else {
+        await updateVideoMetadata({ status: Status.CANCELLED, log: "Manual cancel called" });
+    }
 
     crawlerLog("CANCELLING, CANCELLING, CANCELLING, CANCELLING, CANCELLING", LogType.ERROR);
 }
@@ -71,8 +77,7 @@ const continueIfPending = async(): Promise<void> => {
     const { status } = await getVideoMetadata();
 
     if (status !== Status.PENDING) {
-        crawlerLog("Comment injection no longer is PENDING. Will not continue");
-        throw new Error("Comment injection cancelled");
+        throw new Error("Comment injection no longer is PENDING. Will not continue");
     }
 
     return Promise.resolve();
@@ -165,7 +170,6 @@ const saveComment = async (): Promise<boolean> => {
 const confirmCommentSaved = async(): Promise<boolean> => {
     await updateVideoMetadata({ log: "Verifying generated comment was created..." });
 
-
     const { comment } = await getVideoMetadata();
 
     await delay(1000);
@@ -181,28 +185,59 @@ const confirmCommentSaved = async(): Promise<boolean> => {
     return true;
 }
 
+const logError = async(error: any): Promise<void> => {
+    try {
+        const { status } = await getVideoMetadata();
+
+        if (status !== Status.ERROR) {
+            await updateVideoMetadata({ status: Status.ERROR, log: error?.message ?? error });
+        }
+    } catch(internalError) {
+        await updateVideoMetadata({ status: Status.ERROR, log: "Unexpected unknown error" });
+    }
+}
+
+const handleTimeout = async(): Promise<void> => {
+    await delay(60 * 1000);
+
+    const { status } = await getVideoMetadata();
+
+    if (status === Status.IDLE || status === Status.PENDING) {
+        await cancel(true);
+    }
+}
+
 const main = async(): Promise<void> => {
+    handleTimeout();
+
     await authenticateBot();
 
     await startIfIdle();
 
     const asyncFunctions: (() => Promise<boolean>)[] = [
-        () => isCorrectChannel(),
         () => displayWarning(3),
         () => displayWarning(2),
         () => displayWarning(1),
+        () => isCorrectChannel(),
         () => findTextAreaPlaceHolder(),
         () => prepareTextArea(),
         () => injectGeneratedComment(),
         () => saveComment(),
-        () => confirmCommentSaved(),
-        // TODO: close?
+        () => confirmCommentSaved()
     ];
 
-    await iteratePromiseFunctions(asyncFunctions, () => continueIfPending());
+    try {
+        await iteratePromiseFunctions(asyncFunctions, () => continueIfPending());
+    } catch(error: any) {
+        await logError(error);
+    }
+
+    window.close();
 }
 
-window.moo = main;
+main();
+
+window.main = main;
 (window as any).clearVideoMetadata = clearVideoMetadata;
 (window as any).cancel = cancel;
 (window as any).getVideoLinks = getVideoLinks;

@@ -3,7 +3,7 @@ export {};
 
 declare global {
     interface Window {
-        moo?: unknown;
+        main?: () => Promise<void>;
         __crawler__email__?: string;
         __crawler__password__?: string;
         __crawler_dry_run__?: boolean;
