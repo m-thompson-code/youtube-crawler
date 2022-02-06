@@ -3,6 +3,7 @@ export enum LogType {
     "WARN" = "WARN",
     "ERROR" = "ERROR",
 }
+
 export const crawlerLog = (message: string, logType?: LogType):void => {
     switch(logType) {
         case LogType.ERROR:

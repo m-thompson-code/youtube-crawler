@@ -1,40 +1,76 @@
 import { capitalizeRandomLetter, getGeneratedMessage, removeRandomLetter } from "./comment-generator/comment-generator";
 import { activateTextAreaEditableContent, clickSubmitButton, enableSubmitButton, getChannelName, getExistingComment, getTextAreaEditableContent, getTextAreaPlaceholder, getVideoLinks, injectComment, scrollToBottomOfPage } from "./dom/dom";
 import { crawlerLog, LogType } from "./util/debug";
-import { getVideoStatus, getVideoComment, setVideoComment, Status, setVideoStatus, printLocalStorage, clearLocalStorage } from "./util/local-storage";
 import { delay, iteratePromiseFunctions } from "./util/promises";
+
+import { clearVideoMetadata, getVideoMetadata, setVideoMetadata, Status, updateVideoMetadata } from "./firebase/firestore";
+import { signIn, signOut } from "./firebase/auth";
+
+const authenticateBot = async() => {
+    crawlerLog("Authenticating...");
+
+    try {
+        await signIn();
+        return true;
+    } catch(error) {
+        crawlerLog(`Unexpected issue authenticating. Don't forget to set global email and password`, LogType.ERROR);
+        crawlerLog(`window.__crawler__email__ = "..."; window.__crawler__password__ = "...";`, LogType.ERROR);
+        throw error;
+    }
+}
 
 const isCorrectChannel = async () => {
     const channelName = getChannelName();
 
+    // Assume page hasn't rendered yet to show channel name,
+    // try again
     if (!channelName) {
         return false;
     }
 
     if (channelName !== 'Philip DeFranco') {
-        crawlerLog(`Unexpected channel isn't correct: ${getChannelName()}`);
-        return false;
+        await updateVideoMetadata({ status: Status.CANCELLED, log: `Unexpected channel isn't correct: ${channelName}` });
+
+        throw new Error("Unexpected incorrect channel found");
     }
 
     return true;
 }
 
-const cancel = (): void => {
-    const status = getVideoStatus();
+const cancel = async(): Promise<void> => {
+    const { status } = await getVideoMetadata();
 
     if (status === Status.COMPLETED) {
         crawlerLog("Status is already complete", LogType.WARN);
         return;
     }
 
-    setVideoStatus(Status.CANCELLED);
-    crawlerLog("CANCELLING, CANCELLING, CANCELLING, ,CANCELLING ,CANCELLING", LogType.ERROR);
+    await updateVideoMetadata({ status: Status.CANCELLED, log: "Manual cancel called" });
+
+    crawlerLog("CANCELLING, CANCELLING, CANCELLING, CANCELLING, CANCELLING", LogType.ERROR);
 }
 
-const continueIfPending = (): Promise<void> => {
-    const videoStatus = getVideoStatus();
+const startIfIdle = async(): Promise<boolean> => {
+    const { status } = await getVideoMetadata();
 
-    if (videoStatus !== Status.PENDING) {
+    if (status !== Status.IDLE) {
+        crawlerLog("Video is not IDLE for the day, skipping");
+        throw new Error("Video is not IDLE for the day, skipping");
+    }
+
+    await setVideoMetadata({
+        status: Status.PENDING, 
+        log: "Generating comment started",
+        comment: getGeneratedMessage()
+    });
+
+    return true;
+}
+
+const continueIfPending = async(): Promise<void> => {
+    const { status } = await getVideoMetadata();
+
+    if (status !== Status.PENDING) {
         crawlerLog("Comment injection no longer is PENDING. Will not continue");
         throw new Error("Comment injection cancelled");
     }
@@ -49,7 +85,7 @@ const displayWarning = async (count: number): Promise<boolean> => {
 }
 
 const findTextAreaPlaceHolder = async (): Promise<boolean> => {
-    crawlerLog("Finding placeholder...");
+    await updateVideoMetadata({ log: "Finding placeholder..." });
 
     await delay(1000);
 
@@ -65,12 +101,13 @@ const findTextAreaPlaceHolder = async (): Promise<boolean> => {
         return false;
     }
     
-    crawlerLog("Found placeholder");
+    await updateVideoMetadata({ log: "Found placeholder" });
+
     return true;
 }
 
 const prepareTextArea = async (): Promise<boolean> => {
-    crawlerLog("Activating text area editable content...");
+    await updateVideoMetadata({ log: "Activating text area editable content..." });
 
     await delay(200);
 
@@ -89,13 +126,15 @@ const prepareTextArea = async (): Promise<boolean> => {
     return true;
 }
 
-const injectGeneratedComment = async (message: string): Promise<boolean> => {
-    crawlerLog("Injecting generated comment...");
+const injectGeneratedComment = async (): Promise<boolean> => {
+    await updateVideoMetadata({ log: "Injecting generated comment..." });
+
+    const { comment } = await getVideoMetadata();
 
     await delay(200);
 
     try {
-        injectComment(message);
+        injectComment(comment);
     } catch(error) {
         return false;
     }
@@ -104,7 +143,7 @@ const injectGeneratedComment = async (message: string): Promise<boolean> => {
 }
 
 const saveComment = async (): Promise<boolean> => {
-    crawlerLog("Saving generated comment...");
+    await updateVideoMetadata({ log: "Saving generated comment..." });
 
     await delay(200);
 
@@ -115,7 +154,7 @@ const saveComment = async (): Promise<boolean> => {
 
         clickSubmitButton();
 
-        crawlerLog("Saved generated comment!");
+        await updateVideoMetadata({ log: "Saved generated comment" });
     } catch(error) {
         return false;
     }
@@ -123,33 +162,29 @@ const saveComment = async (): Promise<boolean> => {
     return true;
 }
 
-const confirmCommentSaved = async(message: string): Promise<boolean> => {
-    crawlerLog("Verifying generated comment was created...");
+const confirmCommentSaved = async(): Promise<boolean> => {
+    await updateVideoMetadata({ log: "Verifying generated comment was created..." });
+
+
+    const { comment } = await getVideoMetadata();
 
     await delay(1000);
 
-    const existingComment = getExistingComment(message);
+    const existingComment = getExistingComment(comment);
     
     if (!existingComment) {
         return false;
     }
 
-    setVideoComment(Status.COMPLETED);
-    crawlerLog("Verified generated comment!");
+    await updateVideoMetadata({ status: Status.COMPLETED, log: "Verified generated comment" });
+
     return true;
 }
 
-const main = (): void => {
-    const status = getVideoStatus();
+const main = async(): Promise<void> => {
+    await authenticateBot();
 
-    if (status !== Status.IDLE) {
-        crawlerLog("Video is not IDLE for the day, skipping");
-        return;
-    }
-
-    setVideoComment(Status.PENDING);
-
-    const message = getVideoComment();
+    await startIfIdle();
 
     const asyncFunctions: (() => Promise<boolean>)[] = [
         () => isCorrectChannel(),
@@ -158,22 +193,21 @@ const main = (): void => {
         () => displayWarning(1),
         () => findTextAreaPlaceHolder(),
         () => prepareTextArea(),
-        () => injectGeneratedComment(message),
+        () => injectGeneratedComment(),
         () => saveComment(),
-        () => confirmCommentSaved(message),
+        () => confirmCommentSaved(),
         // TODO: close?
     ];
 
-    iteratePromiseFunctions(asyncFunctions, () => continueIfPending());
+    await iteratePromiseFunctions(asyncFunctions, () => continueIfPending());
 }
 
-main();
-
 window.moo = main;
-(window as any).printLocalStorage = printLocalStorage;
-(window as any).clearLocalStorage = clearLocalStorage;
+(window as any).clearVideoMetadata = clearVideoMetadata;
 (window as any).cancel = cancel;
 (window as any).getVideoLinks = getVideoLinks;
 (window as any).getGeneratedMessage = getGeneratedMessage;
 (window as any).capitalizeRandomLetter = capitalizeRandomLetter;
 (window as any).removeRandomLetter = removeRandomLetter;
+(window as any).getChannelName = getChannelName;
+(window as any).signOut = signOut;
