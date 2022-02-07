@@ -57,7 +57,7 @@ const cancel = async(cancelDueToTimeout: boolean): Promise<void> => {
 }
 
 const startIfIdle = async(): Promise<boolean> => {
-    const { status } = await getVideoMetadata();
+    const { status, comment } = await getVideoMetadata();
 
     if (status !== Status.IDLE) {
         crawlerLog("Video is not IDLE for the day, skipping");
@@ -67,7 +67,7 @@ const startIfIdle = async(): Promise<boolean> => {
     await setVideoMetadata({
         status: Status.PENDING, 
         log: "Generating comment started",
-        comment: getGeneratedMessage()
+        comment: comment || getGeneratedMessage()
     });
 
     return true;
